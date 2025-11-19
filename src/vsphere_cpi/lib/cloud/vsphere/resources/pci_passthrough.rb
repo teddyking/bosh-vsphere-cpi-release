@@ -2,6 +2,7 @@ module VSphereCloud
   module Resources
     class PCIPassthrough
       @@key = 0
+      @@group_key = 0
 
       def self.create_pci_passthrough(vendor_id:, device_id:)
         allowed_device = VimSdk::Vim::Vm::Device::VirtualPCIPassthrough::AllowedDevice.new
@@ -24,10 +25,23 @@ module VSphereCloud
         pci_passthrough
       end
 
+      def self.create_device_group(device_group_name)
+        device_group = VimSdk::Vim::Vm::VirtualDeviceGroups::VendorDeviceGroup.new
+        device_group.device_group_name = device_group_name
+        device_group.group_instance_key = unique_group_key
+        device_group
+      end
+
       # avoid "Cannot add multiple devices using the same device key.." when
       # adding multiple vGPUs
       def self.unique_key
         @@key -= 1
+      end
+
+      # avoid "Cannot add multiple device groups using the same group key.." when
+      # adding multiple device groups
+      def self.unique_group_key
+        @@group_key += 1
       end
     end
   end

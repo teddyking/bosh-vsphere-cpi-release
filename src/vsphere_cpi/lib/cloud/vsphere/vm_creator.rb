@@ -247,16 +247,19 @@ module VSphereCloud
 
             begin
               # Upgrade to latest virtual hardware version
-              # We decide to upgrade hardware version on basis of four params
+              # We decide to upgrade hardware version on basis of five params
               # 1. vm_type specification of upgrade hardware flag and
               # 2. Global upgrade hardware flag @upgrade_hw_version
               # 3. vm_config of vgpus has entries (>1 vgpu requires upgraded hw)
               # 4. vm_config of pci_passthroughs has entries
+              # 5. vm_config of device_groups has entries (device groups require upgraded hw)
               if vm_config.upgrade_hw_version?(vm_config.vm_type.upgrade_hw_version, @upgrade_hw_version)
                 created_vm.upgrade_vm_virtual_hardware
               elsif !vm_config.vgpus.empty?
                 created_vm.upgrade_vm_virtual_hardware
               elsif !vm_config.pci_passthroughs.empty?
+                created_vm.upgrade_vm_virtual_hardware
+              elsif !vm_config.device_groups.empty?
                 created_vm.upgrade_vm_virtual_hardware
               else
                 created_vm.upgrade_vm_virtual_hardware(@default_hw_version)
@@ -286,6 +289,22 @@ module VSphereCloud
                 # add 1 GPU per task, allow multiple GPUs with same deviceId to be added
                 @client.reconfig_vm(created_vm_mob, config_spec)
               end
+            end
+            # Add device groups after hardware version has been upgraded
+            # Device groups are used for NVIDIA NVLink GPU configurations
+            unless vm_config.device_groups.empty?
+              config_spec = VimSdk::Vim::Vm::ConfigSpec.new
+              device_group_info = VimSdk::Vim::Vm::VirtualDeviceGroups.new
+              device_group_info.device_group = []
+
+              vm_config.device_groups.each do |device_group_name|
+                device_group = Resources::PCIPassthrough.create_device_group(device_group_name)
+                device_group_info.device_group << device_group
+                logger.info("Adding device group '#{device_group_name}' to VM '#{vm_config.name}'")
+              end
+
+              config_spec.device_groups = device_group_info
+              @client.reconfig_vm(created_vm_mob, config_spec)
             end
 
             if vm_config.root_disk_size_gb > 0

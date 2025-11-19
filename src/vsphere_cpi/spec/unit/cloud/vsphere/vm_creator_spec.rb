@@ -149,6 +149,7 @@ module VSphereCloud
           ephemeral_disk_size: 1024,
           pci_passthroughs: [],
           vgpus: [],
+          device_groups: [],
           calculate_cpu_reservation: nil,
           cluster_placements: [
             instance_double(VmPlacement,
@@ -303,6 +304,23 @@ module VSphereCloud
         end
       end
 
+      context 'with device groups' do
+        let(:device_group_name) { 'nvlink-gpu-group-1' }
+        let(:device_group) { instance_double(VimSdk::Vim::Vm::VirtualDeviceGroups::VendorDeviceGroup) }
+
+        before do
+          allow(vm_config).to receive(:device_groups).and_return([device_group_name])
+        end
+
+        it 'upgrades the vm hardware and reconfigures the VM with the device group' do
+          expect(Resources::PCIPassthrough).to receive(:create_device_group)
+                                                 .with(device_group_name).and_return(device_group)
+          expect(client).to receive(:upgrade_vm_virtual_hardware).with(cloned_vm_mob, nil)
+          expect(client).to receive(:reconfig_vm).with(cloned_vm_mob, anything)
+          subject.create(vm_config)
+        end
+      end
+
       context 'with root_disk_size_gb set to 15 GiB' do
         let(:device_spec_system_disk) { instance_double('VimSdk::Vim::Vm::Device::VirtualDisk') }
         let(:device_spec) { instance_double(VimSdk::Vim::Vm::Device::VirtualDeviceSpec, device: device_spec_system_disk) }
@@ -411,6 +429,7 @@ module VSphereCloud
                                             ephemeral_disk_size: 1024,
                                             pci_passthroughs: [],
                                             vgpus: [],
+                                            device_groups: [],
                                             calculate_cpu_reservation: nil,
                                             cluster_placements: [
                                               instance_double(VmPlacement,

@@ -24,7 +24,8 @@ proc {
 }.call if ENV["BOSH_VSPHERE_CPI_HOST"]
 
 # set $vc_version for unit tests
-$vc_version = '7.0' if $vc_version.nil?
+# Using 8.0 to support device groups feature
+$vc_version = '8.0' if $vc_version.nil?
 
 require 'cloud/vsphere'
 require 'base64'

@@ -838,6 +838,31 @@ module VSphereCloud
       end
     end
 
+    describe '#device_groups' do
+      context 'device_groups are specified' do
+        let(:device_groups) { ['nvlink-group-1', 'nvlink-group-2'] }
+        let(:cloud_properties){
+          {
+            'device_groups' => device_groups
+          }
+        }
+        let(:input) { { vm_type: vm_type } }
+
+        it 'should return the device_groups' do
+          expect(vm_config.device_groups).to eq(device_groups)
+        end
+      end
+
+      context 'device_groups are NOT specified' do
+        let(:cloud_properties){ {} }
+        let(:input) { { vm_type: vm_type } }
+
+        it 'should return an empty array' do
+          expect(vm_config.device_groups).to eq([])
+        end
+      end
+    end
+
     describe '#vmx_options' do
       let(:cloud_properties) { {} }
       let(:input) { {vm_type: vm_type, vmx_options: nil} }
