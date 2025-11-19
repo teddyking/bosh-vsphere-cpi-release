@@ -1,0 +1,124 @@
+diff --git a/src/vsphere_cpi/lib/cloud/vsphere/resources/pci_passthrough.rb b/src/vsphere_cpi/lib/cloud/vsphere/resources/pci_passthrough.rb
+index 50db43ff..47ef6e4f 100644
+--- a/src/vsphere_cpi/lib/cloud/vsphere/resources/pci_passthrough.rb
++++ b/src/vsphere_cpi/lib/cloud/vsphere/resources/pci_passthrough.rb
+@@ -2,6 +2,7 @@ module VSphereCloud
+   module Resources
+     class PCIPassthrough
+       @@key = 0
++      @@group_key = 0
+ 
+       def self.create_pci_passthrough(vendor_id:, device_id:)
+         allowed_device = VimSdk::Vim::Vm::Device::VirtualPCIPassthrough::AllowedDevice.new
+@@ -24,11 +25,24 @@ module VSphereCloud
+         pci_passthrough
+       end
+ 
++      def self.create_device_group(device_group_name)
++        device_group = VimSdk::Vim::Vm::VirtualDeviceGroups::VendorDeviceGroup.new
++        device_group.device_group_name = device_group_name
++        device_group.group_instance_key = unique_group_key
++        device_group
++      end
++
+       # avoid "Cannot add multiple devices using the same device key.." when
+       # adding multiple vGPUs
+       def self.unique_key
+         @@key -= 1
+       end
++
++      # avoid "Cannot add multiple device groups using the same group key.." when
++      # adding multiple device groups
++      def self.unique_group_key
++        @@group_key += 1
++      end
+     end
+   end
+ end
+\ No newline at end of file
+diff --git a/src/vsphere_cpi/lib/cloud/vsphere/vm_config.rb b/src/vsphere_cpi/lib/cloud/vsphere/vm_config.rb
+index 0280c22e..c90332e8 100644
+--- a/src/vsphere_cpi/lib/cloud/vsphere/vm_config.rb
++++ b/src/vsphere_cpi/lib/cloud/vsphere/vm_config.rb
+@@ -101,6 +101,10 @@ module VSphereCloud
+       vm_type.vgpus || []
+     end
+ 
++    def device_groups
++      vm_type.device_groups || []
++    end
++
+     def human_readable_name_enabled?
+       @manifest_params[:enable_human_readable_name]
+     end
+@@ -266,6 +270,9 @@ module VSphereCloud
+       if pci_passthroughs.size > 0
+         return true
+       end
++      if device_groups.size > 0
++        return true
++      end
+       false
+     end
+   end
+diff --git a/src/vsphere_cpi/lib/cloud/vsphere/vm_creator.rb b/src/vsphere_cpi/lib/cloud/vsphere/vm_creator.rb
+index 012468d7..11ce8d60 100644
+--- a/src/vsphere_cpi/lib/cloud/vsphere/vm_creator.rb
++++ b/src/vsphere_cpi/lib/cloud/vsphere/vm_creator.rb
+@@ -247,17 +247,20 @@ module VSphereCloud
+ 
+             begin
+               # Upgrade to latest virtual hardware version
+-              # We decide to upgrade hardware version on basis of four params
++              # We decide to upgrade hardware version on basis of five params
+               # 1. vm_type specification of upgrade hardware flag and
+               # 2. Global upgrade hardware flag @upgrade_hw_version
+               # 3. vm_config of vgpus has entries (>1 vgpu requires upgraded hw)
+               # 4. vm_config of pci_passthroughs has entries
++              # 5. vm_config of device_groups has entries (device groups require upgraded hw)
+               if vm_config.upgrade_hw_version?(vm_config.vm_type.upgrade_hw_version, @upgrade_hw_version)
+                 created_vm.upgrade_vm_virtual_hardware
+               elsif !vm_config.vgpus.empty?
+                 created_vm.upgrade_vm_virtual_hardware
+               elsif !vm_config.pci_passthroughs.empty?
+                 created_vm.upgrade_vm_virtual_hardware
++              elsif !vm_config.device_groups.empty?
++                created_vm.upgrade_vm_virtual_hardware
+               else
+                 created_vm.upgrade_vm_virtual_hardware(@default_hw_version)
+               end
+@@ -287,6 +290,22 @@ module VSphereCloud
+                 @client.reconfig_vm(created_vm_mob, config_spec)
+               end
+             end
++            # Add device groups after hardware version has been upgraded
++            # Device groups are used for NVIDIA NVLink GPU configurations
++            unless vm_config.device_groups.empty?
++              config_spec = VimSdk::Vim::Vm::ConfigSpec.new
++              device_group_info = VimSdk::Vim::Vm::VirtualDeviceGroups.new
++              device_group_info.device_group = []
++
++              vm_config.device_groups.each do |device_group_name|
++                device_group = Resources::PCIPassthrough.create_device_group(device_group_name)
++                device_group_info.device_group << device_group
++                logger.info("Adding device group '#{device_group_name}' to VM '#{vm_config.name}'")
++              end
++
++              config_spec.device_groups = device_group_info
++              @client.reconfig_vm(created_vm_mob, config_spec)
++            end
+ 
+             if vm_config.root_disk_size_gb > 0
+               device_spec = Resources::VM.create_edit_device_spec(created_vm.system_disk)
+diff --git a/src/vsphere_cpi/lib/cloud/vsphere/vm_type.rb b/src/vsphere_cpi/lib/cloud/vsphere/vm_type.rb
+index d3e8ad8d..c9025f72 100644
+--- a/src/vsphere_cpi/lib/cloud/vsphere/vm_type.rb
++++ b/src/vsphere_cpi/lib/cloud/vsphere/vm_type.rb
+@@ -21,6 +21,7 @@ module VSphereCloud
+       cpu_hot_add_enabled
+       cpu_reserve_full_mhz
+       datacenters
++      device_groups
+       disable_drs
+       disk
+       memory_hot_add_enabled
